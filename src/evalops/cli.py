@@ -225,3 +225,21 @@ def gate_command(
         _echo_report(report, gate.name)
     if report.verdict == "block":
         raise typer.Exit(2)
+
+
+@app.command("serve")
+def serve_command(
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址"),
+    port: int = typer.Option(8000, "--port", help="监听端口"),
+    db: str | None = typer.Option(None, "--db", help="SQLite 路径或数据库 URL"),
+) -> None:
+    """启动本地评测控制台（需要安装 web 依赖）。"""
+    try:
+        import uvicorn
+    except ImportError:
+        _fail('未安装 Web 依赖，请执行: pip install -e ".[web]"')
+    from evalops.api.app import create_app
+
+    url = resolve_db_url(db)
+    typer.echo(f"控制台: http://{host}:{port}  数据库: {url}")
+    uvicorn.run(create_app(url), host=host, port=port, log_level="info")

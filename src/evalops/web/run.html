@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EvalOps · 运行详情</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">EvalOps</a>
+    <a class="crumb" href="/">运行记录</a>
+    <span class="crumb">/</span>
+    <span class="crumb mono" id="run-crumb">-</span>
+    <span class="grow"></span>
+    <button class="btn ghost" id="mark-baseline" type="button">标记为基线</button>
+  </header>
+
+  <main class="page">
+    <div id="banner"></div>
+    <div class="metrics" id="metrics"></div>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>用例结果</h2>
+        <span class="grow"></span>
+        <span class="muted" id="run-meta"></span>
+      </div>
+      <div id="cases"></div>
+    </section>
+  </main>
+
+  <script src="/assets/run.js"></script>
+</body>
+</html>

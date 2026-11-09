@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EvalOps · 评测控制台</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">EvalOps</a>
+    <span class="crumb">评测控制台</span>
+    <span class="grow"></span>
+    <span class="muted">运行记录与门禁</span>
+  </header>
+
+  <main class="page">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>新建运行</h2>
+        <span class="muted">使用示例项目，或填入本地项目配置路径</span>
+      </div>
+      <form class="form" id="run-form">
+        <label>项目配置
+          <input type="text" name="project" value="examples/projects/fake.yaml" required>
+        </label>
+        <label>用例目录
+          <input type="text" name="cases" value="examples/cases" required>
+        </label>
+        <label>标签
+          <input type="text" name="tags" placeholder="smoke,refund（可选）">
+        </label>
+        <label class="check"><input type="checkbox" name="baseline"> 记录为基线</label>
+        <button class="btn" type="submit" id="run-submit">开始运行</button>
+        <span class="muted" id="form-msg"></span>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>运行记录</h2>
+        <span class="grow"></span>
+        <span class="muted" id="run-count"></span>
+      </div>
+      <div id="runs"></div>
+    </section>
+  </main>
+
+  <script src="/assets/index.js"></script>
+</body>
+</html>

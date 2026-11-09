@@ -58,6 +58,20 @@ evalops gate --baseline <run_id> --candidate <run_id> --gate examples/gates/defa
 evalops gate --candidate latest --json
 ```
 
+## 可视化控制台
+
+不想敲命令时，可以启动内置控制台查看运行记录、用例结果与门禁判定：
+
+```bash
+pip install -e ".[web]"
+evalops serve --port 8000
+# 打开 http://127.0.0.1:8000
+```
+
+页面只读为主：运行列表、运行详情（指标 + 失败断言定位）、一键标记基线并查看
+门禁结果；也可以从页面触发一次评测。配置仍由 YAML / CLI 管理。
+需要鉴权或多用户协作时，应在此之上替换为正式 Web 服务。
+
 ## 用例 DSL
 
 用例是声明式数据，不是代码：
