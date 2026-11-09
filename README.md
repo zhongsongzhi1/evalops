@@ -5,7 +5,9 @@
 前两个 Agent 项目回答"能不能做"，EvalOps 回答"改完之后有没有变差"：
 用例集版本化 → 轨迹执行与录制 → 多级断言 → baseline / candidate 对比 → 门禁阻断。
 
-当前进度：**阶段 0（零密钥最小闭环）**。
+当前进度：**阶段 1（语义断言、真实 adapter、控制面已就绪）**。
+
+完整设计与实施计划见 [docs/project-plan.md](docs/project-plan.md)。
 
 ## 零密钥快速开始
 
@@ -45,6 +47,11 @@ evalops gate --candidate latest
 | `evalops compare` | 按 `case_key` 对齐，输出 New Failures / 修复 / 新增 / 移除 | 0 |
 | `evalops gate` | 按门禁规则给出 `pass` / `warn` / `block` | `block` 时 2 |
 
+运行状态机为 `queued → running → succeeded / failed / cancelled`：执行异常或
+Ctrl+C 也会写入终态（`finished_at` 不为空），不会永久停在 `running`；只有
+`succeeded` 的运行才能被标记为基线。断言失败属于评测结果（Pass Rate），
+不改变执行状态，沿用门禁判定。
+
 常用参数：
 
 ```bash
@@ -57,6 +64,52 @@ evalops gate --baseline <run_id> --candidate <run_id> --gate examples/gates/defa
 # 机器可读输出
 evalops gate --candidate latest --json
 ```
+
+## 真实 adapter
+
+除 `fake`（录制回放）外，阶段 1 提供了两类真实接入方式：
+
+```yaml
+# projects/agent.yaml
+name: my-agent
+adapter: http                 # fake | http | langgraph | openai_agents
+config:
+  endpoint: "http://127.0.0.1:9000/run"
+  headers: { Authorization: "Bearer demo-token" }
+  timeout_s: 30
+```
+
+- `http`：平台把 `{case_key, name, input, tags}` POST 给 `config.endpoint`，
+  服务返回与 fixture 相同的标准轨迹 JSON（`output / steps / tokens_in /
+  tokens_out / latency_ms`）。
+- `langgraph` / `openai_agents`：声明 `entrypoint: "module:function"`，函数签名
+  `run(case, config)`，可同步或异步，返回标准轨迹 dict 或 `Trajectory`。
+  框架相关的状态拼装留在被测项目侧（≤50 行），平台只做执行与归一化。
+  模块必须位于项目目录内，加载时会校验路径；当前为进程内执行，只接入受信项目。
+
+## 语义断言
+
+```yaml
+assertions:
+  - type: semantic
+    reference: "超过7天通常不支持无理由退款，需人工审核"
+    threshold: 0.85
+```
+
+embedding 来源由项目配置显式声明，缺省是零密钥的离线 `mock`：
+
+```yaml
+config:
+  embedding:
+    provider: mock            # 字符 n-gram 哈希向量，仅用于演示与 CI
+    # provider: openai        # 真实路径：OpenAI 兼容 /embeddings 接口
+    # model: text-embedding-3-small
+    # base_url: https://api.openai.com/v1
+    # api_key_env: OPENAI_API_KEY
+```
+
+`mock` 衡量的是字面重合度，不代表真实语义，README 与指标中均按「演示模式」标注；
+需要真实语义时切到 `openai`（或兼容网关）并显式配置 Key。
 
 ## 可视化控制台
 
@@ -97,8 +150,9 @@ tags: [regression, refund]
 ```
 
 阶段 0 已实现断言：`contains` / `not_contains` / `equals` / `regex` /
-`tool_calls`（含顺序与 `args_contains`）/ `max_latency_ms` / `max_cost_usd`。
-语义断言与 LLM Judge 在阶段 1 接入，`json_schema` 暂不支持。
+`tool_calls`（含顺序与 `args_contains`）/ `max_latency_ms` / `max_cost_usd`；
+阶段 1 新增 `semantic`（余弦相似度）。LLM Judge 与 Judge 校准在阶段 2 接入，
+`json_schema` 暂不支持。
 
 门禁规则：
 
@@ -124,13 +178,14 @@ rules:
 ```
 src/evalops/
 ├── cases/dsl.py        # project.yaml / cases/*.yaml 校验，case_key 规则
-├── adapters/           # adapter 白名单：fake / http / langgraph / openai_agents
-├── assertions.py       # 断言引擎（精确 + 工具轨迹）
+├── adapters/           # fake / http / langgraph / openai_agents
+├── embeddings.py       # semantic 断言的 embedding 来源（mock / openai）
+├── assertions.py       # 断言引擎（精确 + 语义 + 工具轨迹）
 ├── runner.py           # 执行、轨迹落库、成本计算
 ├── regression.py       # baseline/candidate 对比与门禁判定
 ├── db/models.py        # 12 张表
 ├── db/schema.py        # Alembic 升级入口
-└── cli.py              # run / compare / gate
+└── cli.py              # run / compare / gate / serve
 examples/               # golden 用例、录制轨迹、门禁配置
 tests/                  # 单测 + 门禁回归测试
 ```
@@ -151,9 +206,9 @@ tests/                  # 单测 + 门禁回归测试
 
 ## 路线图
 
-- **阶段 0（当前）**：仓库骨架、12 张表、DSL、fake adapter、精确断言、三条 CLI、CI
-- **阶段 1**：语义断言、真实 adapter、FastAPI 控制面
-- **阶段 2**：工具轨迹断言、LLM Judge、Judge 校准（Cohen's κ）、GitHub Actions 门禁
+- **阶段 0**：仓库骨架、12 张表、DSL、fake adapter、精确断言、三条 CLI、CI
+- **阶段 1（当前）**：语义断言（mock / OpenAI 兼容）、真实 adapter（http + entrypoint）、FastAPI 控制面
+- **阶段 2**：LLM Judge、Judge 校准（Cohen's κ）、GitHub Actions 门禁
 - **阶段 3**：flaky 率、p95、成本趋势、轨迹回放 diff、最小前端
 - **阶段 4**：Docker Compose、英文 README、demo 录屏
 
