@@ -1,0 +1,18 @@
+name: 退款政策咨询
+key: refund_policy
+input:
+  messages:
+    - role: user
+      content: "我买的课程能退款吗？已经过了7天"
+expected:
+  answer_contains: ["退款", "7天"]
+  answer_not_contains: ["保证退款"]
+  tool_calls:
+    - name: query_order
+    - name: check_refund_policy
+      args_contains:
+        order_id: "*"
+assertions:
+  - type: max_latency_ms
+    value: 5000
+tags: [regression, refund]

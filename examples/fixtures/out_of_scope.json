@@ -1,0 +1,17 @@
+{
+  "output": "抱歉，我无法提供劳动合同起草服务，这超出了我的服务范围。",
+  "tokens_in": 150,
+  "tokens_out": 40,
+  "latency_ms": 500,
+  "steps": [
+    {
+      "step": 1,
+      "type": "llm",
+      "name": "answer",
+      "input": {"query": "帮我写一份劳动合同"},
+      "output": "抱歉，我无法提供劳动合同起草服务，这超出了我的服务范围。",
+      "tokens": 190,
+      "latency_ms": 500
+    }
+  ]
+}

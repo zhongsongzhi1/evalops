@@ -1,0 +1,8 @@
+name: demo-agent
+adapter: fake
+config:
+  fixtures_dir: ../fixtures
+  model: fake-gpt
+  price_in_per_1k: 0.0005
+  price_out_per_1k: 0.0015
+  case_timeout_s: 10

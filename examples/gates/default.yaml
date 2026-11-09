@@ -1,0 +1,5 @@
+name: default
+rules:
+  max_pass_rate_drop: 0.02
+  max_new_failures: 0
+  max_cost_increase: 0.20

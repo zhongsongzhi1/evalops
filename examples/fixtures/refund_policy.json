@@ -1,0 +1,42 @@
+{
+  "output": "您的课程已购买 12 天，超过7天退款期，退款需要人工审核，请通过客服提交申请。",
+  "tokens_in": 320,
+  "tokens_out": 86,
+  "latency_ms": 1240,
+  "steps": [
+    {
+      "step": 1,
+      "type": "llm",
+      "name": "plan",
+      "input": {"query": "我买的课程能退款吗？已经过了7天"},
+      "output": "需要先查询订单与退款政策",
+      "tokens": 210,
+      "latency_ms": 420
+    },
+    {
+      "step": 2,
+      "type": "tool",
+      "name": "query_order",
+      "input": {"order_id": "A1B2C3"},
+      "output": {"order_id": "A1B2C3", "paid_days_ago": 12, "status": "paid"},
+      "latency_ms": 120
+    },
+    {
+      "step": 3,
+      "type": "tool",
+      "name": "check_refund_policy",
+      "input": {"order_id": "A1B2C3", "product_type": "course"},
+      "output": {"refundable_within_days": 7, "manual_review": true},
+      "latency_ms": 90
+    },
+    {
+      "step": 4,
+      "type": "llm",
+      "name": "answer",
+      "input": {"context": "订单 12 天前支付，退款期 7 天"},
+      "output": "您的课程已购买 12 天，超过7天退款期，退款需要人工审核，请通过客服提交申请。",
+      "tokens": 196,
+      "latency_ms": 610
+    }
+  ]
+}

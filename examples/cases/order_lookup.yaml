@@ -1,0 +1,17 @@
+name: 订单状态查询
+key: order_lookup
+input:
+  messages:
+    - role: user
+      content: "帮我查一下订单 A1B2C3 的状态"
+assertions:
+  - type: contains
+    values: ["已发货"]
+  - type: regex
+    pattern: '订单\s*A1B2C3'
+  - type: tool_calls
+    tools:
+      - name: query_order
+        args_contains:
+          order_id: A1B2C3
+tags: [regression]
