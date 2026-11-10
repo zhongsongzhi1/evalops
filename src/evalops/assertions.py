@@ -1,13 +1,16 @@
-"""断言引擎：阶段 0 覆盖精确断言（contains / not_contains / equals / regex /
-tool_calls / max_latency_ms / max_cost_usd）。
+"""断言引擎：精确断言（contains / not_contains / equals / regex / tool_calls /
+max_latency_ms / max_cost_usd）、semantic 语义断言与 llm_judge 评审断言。
 
-语义断言与 LLM Judge 在阶段 1 接入；断言只读取轨迹，不看被测系统的内部实现。
+embedding 与 Judge 来源均由项目配置显式声明（见 ``evalops.embeddings`` /
+``evalops.judge``）。断言只读取轨迹，不看被测系统的内部实现。
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from evalops.adapters.base import Step, Trajectory
@@ -15,12 +18,16 @@ from evalops.cases.dsl import (
     CaseSpec,
     ContainsAssertion,
     EqualsAssertion,
+    LlmJudgeAssertion,
     MaxCostAssertion,
     MaxLatencyAssertion,
     NotContainsAssertion,
     RegexAssertion,
+    SemanticAssertion,
     ToolCallsAssertion,
 )
+from evalops.embeddings import Embedder, MockEmbedder, cosine
+from evalops.judge import Judge, MockJudge, load_rubric
 
 
 @dataclass
@@ -92,16 +99,25 @@ def _check_tool_calls(
     return not violations, {"calls": details, "violations": violations}
 
 
-def evaluate_assertions(
-    case: CaseSpec, trajectory: Trajectory, cost_usd: float = 0.0
+async def evaluate_assertions(
+    case: CaseSpec,
+    trajectory: Trajectory,
+    cost_usd: float = 0.0,
+    embedder: Embedder | None = None,
+    judge: Judge | None = None,
+    rubric_dirs: Sequence[Path] | None = None,
 ) -> list[AssertionOutcome]:
     """按编译后的断言顺序逐条判定，``seq`` 与 DSL 中的序号一致。"""
     output = trajectory.output
     calls = trajectory.tool_calls()
+    active_embedder = embedder or MockEmbedder()
+    active_judge: Judge = judge or MockJudge(embedder=active_embedder)
+    search_dirs = list(rubric_dirs) if rubric_dirs else [Path.cwd()]
     outcomes: list[AssertionOutcome] = []
 
     for seq, spec in enumerate(case.compiled_assertions()):
         detail: dict[str, Any]
+        score: float | None = None
         if isinstance(spec, ContainsAssertion):
             missing = [value for value in spec.values if value not in output]
             passed = not missing
@@ -125,6 +141,23 @@ def evaluate_assertions(
         elif isinstance(spec, MaxCostAssertion):
             passed = cost_usd <= spec.value
             detail = {"actual_usd": cost_usd, "max_usd": spec.value}
+        elif isinstance(spec, SemanticAssertion):
+            vectors = await active_embedder.embed([output, spec.reference])
+            similarity = cosine(vectors[0], vectors[1])
+            passed = similarity >= spec.threshold
+            score = similarity
+            detail = {
+                "similarity": round(similarity, 4),
+                "threshold": spec.threshold,
+                "reference": spec.reference,
+                "provider": active_embedder.name,
+            }
+        elif isinstance(spec, LlmJudgeAssertion):
+            rubric = load_rubric(spec.rubric, search_dirs)
+            judged = await active_judge.score(rubric, output, spec.samples)
+            passed = judged.score >= spec.pass_score
+            score = judged.score
+            detail = judged.to_detail(rubric, spec.pass_score)
         else:  # pragma: no cover - 类型联合已穷尽
             raise TypeError(f"未知断言类型: {type(spec)!r}")
 
@@ -133,7 +166,7 @@ def evaluate_assertions(
                 seq=seq,
                 type=spec.type,
                 passed=passed,
-                score=1.0 if passed else 0.0,
+                score=score if score is not None else (1.0 if passed else 0.0),
                 detail=detail,
             )
         )

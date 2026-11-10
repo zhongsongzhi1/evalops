@@ -37,7 +37,7 @@ def test_broken_golden_case_blocks_gate(workdir: Path) -> None:
     baseline = _run(workdir, "--baseline")
     assert baseline.exit_code == 0, baseline.output
     baseline_payload = json.loads(baseline.output)
-    assert baseline_payload["passed"] == 3
+    assert baseline_payload["passed"] == 4
 
     fixture_path = workdir / "fixtures" / "refund_policy.json"
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -47,7 +47,7 @@ def test_broken_golden_case_blocks_gate(workdir: Path) -> None:
     candidate = _run(workdir)
     assert candidate.exit_code == 0, candidate.output
     candidate_payload = json.loads(candidate.output)
-    assert candidate_payload["passed"] == 2
+    assert candidate_payload["passed"] == 3
     assert candidate_payload["failed"] == 1
 
     gate = runner.invoke(

@@ -12,6 +12,7 @@ from evalops.cases.dsl import CaseSpec, DslError, load_cases, load_project
 def test_golden_cases_load(workdir: Path) -> None:
     loaded = load_cases(workdir / "cases")
     assert sorted(case.case_key for case in loaded.cases) == [
+        "judge_refund_quality",
         "order_lookup",
         "out_of_scope",
         "refund_policy",
@@ -83,6 +84,20 @@ def test_langgraph_requires_entrypoint(tmp_path: Path) -> None:
     project_file = tmp_path / "project.yaml"
     project_file.write_text("name: demo\nadapter: langgraph\n", encoding="utf-8")
     with pytest.raises(DslError, match="entrypoint"):
+        load_project(project_file)
+
+
+def test_http_requires_endpoint(tmp_path: Path) -> None:
+    project_file = tmp_path / "project.yaml"
+    project_file.write_text("name: demo\nadapter: http\n", encoding="utf-8")
+    with pytest.raises(DslError, match="endpoint"):
+        load_project(project_file)
+
+    project_file.write_text(
+        "name: demo\nadapter: http\nconfig:\n  endpoint: ftp://example.com\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(DslError, match="endpoint"):
         load_project(project_file)
 
 

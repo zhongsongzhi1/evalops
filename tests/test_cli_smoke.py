@@ -42,8 +42,8 @@ def test_run_compare_gate_pass(workdir: Path) -> None:
     result = runner.invoke(app, _args(workdir, "run", "--baseline", "--json"))
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["total"] == 3
-    assert payload["passed"] == 3
+    assert payload["total"] == 4
+    assert payload["passed"] == 4
     assert payload["status"] == "succeeded"
     assert payload["pass_rate"] == 1.0
     assert payload["assertion_pass_rate"] == 1.0

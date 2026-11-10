@@ -17,7 +17,15 @@ from sqlalchemy import func, select
 
 from evalops.adapters import AgentAdapter, Trajectory, build_adapter
 from evalops.assertions import AssertionOutcome, evaluate_assertions
-from evalops.cases.dsl import DslError, LoadedProject, filter_cases, load_cases
+from evalops.cases.dsl import (
+    CaseSpec,
+    DslError,
+    LlmJudgeAssertion,
+    LoadedProject,
+    SemanticAssertion,
+    filter_cases,
+    load_cases,
+)
 from evalops.db.models import (
     AssertionResult,
     Baseline,
@@ -28,6 +36,8 @@ from evalops.db.models import (
     Run,
 )
 from evalops.db.session import Database
+from evalops.embeddings import Embedder, build_embedder
+from evalops.judge import Judge, build_judge
 
 
 @dataclass
@@ -82,9 +92,12 @@ def compute_cost(trajectory: Trajectory, prices: tuple[float, float]) -> float:
 async def _execute_case(
     adapter: AgentAdapter,
     project: LoadedProject,
-    case: Any,
+    case: CaseSpec,
     timeout_s: float,
     prices: tuple[float, float],
+    embedder: Embedder | None = None,
+    judge: Judge | None = None,
+    rubric_dirs: list[Path] | None = None,
 ) -> tuple[CaseOutcome, list[dict[str, Any]], list[AssertionOutcome]]:
     started = perf_counter()
     try:
@@ -119,7 +132,31 @@ async def _execute_case(
         )
 
     cost = compute_cost(trajectory, prices)
-    assertions = evaluate_assertions(case, trajectory, cost_usd=cost)
+    try:
+        assertions = await evaluate_assertions(
+            case,
+            trajectory,
+            cost_usd=cost,
+            embedder=embedder,
+            judge=judge,
+            rubric_dirs=rubric_dirs,
+        )
+    except Exception as exc:  # noqa: BLE001 - embedding 等断言依赖失败不应当中断整次运行
+        elapsed = int((perf_counter() - started) * 1000)
+        return (
+            CaseOutcome(
+                case_key=case.case_key,
+                name=case.name,
+                status="error",
+                latency_ms=trajectory.latency_ms or elapsed,
+                cost_usd=cost,
+                tokens_in=trajectory.tokens_in,
+                tokens_out=trajectory.tokens_out,
+                error=f"断言执行失败: {exc}",
+            ),
+            trajectory.to_dicts(),
+            [],
+        )
     passed = all(item.passed for item in assertions)
     missing_latency = int((perf_counter() - started) * 1000)
     outcome = CaseOutcome(
@@ -233,6 +270,17 @@ async def _persist_case_result(
     await session.commit()
 
 
+async def _finalize_run(db: Database, run_id: str, status: str) -> None:
+    """异常/取消路径收尾：用独立会话把 run 写成终态，避免永久停在 running。"""
+    async with db.sessionmaker() as session:
+        run = await session.get(Run, run_id)
+        if run is None:
+            return
+        run.status = status
+        run.finished_at = datetime.now(UTC)
+        await session.commit()
+
+
 async def execute_run(
     db: Database,
     project: LoadedProject,
@@ -253,6 +301,13 @@ async def execute_run(
     adapter = build_adapter(project)
     prices = _prices(project)
     timeout_s = float(project.spec.config.get("case_timeout_s", 30))
+    assertion_specs = [item for case in selected for item in case.compiled_assertions()]
+    needs_embedding = any(isinstance(item, SemanticAssertion) for item in assertion_specs)
+    needs_judge = any(isinstance(item, LlmJudgeAssertion) for item in assertion_specs)
+    embedder = build_embedder(project.spec.config) if needs_embedding or needs_judge else None
+    judge = build_judge(project.spec.config, embedder) if needs_judge else None
+    cases_dir = Path(cases_path) if Path(cases_path).is_dir() else Path(cases_path).parent
+    rubric_dirs = [project.base_dir, cases_dir, Path.cwd()]
     started = perf_counter()
     outcomes: list[CaseOutcome] = []
     assertion_passed = 0
@@ -274,28 +329,47 @@ async def execute_run(
         await session.commit()
         run_id = run.id
 
-        for case in selected:
-            outcome, trajectory, assertions = await _execute_case(
-                adapter, project, case, timeout_s, prices
-            )
-            outcomes.append(outcome)
-            assertion_passed += sum(1 for item in assertions if item.passed)
-            assertion_total += len(assertions)
-            await _persist_case_result(
-                session, run_id, case_ids[case.case_key], outcome, trajectory, assertions
-            )
-            run.cost_usd = round(run.cost_usd + outcome.cost_usd, 8)
-            await session.commit()
+        try:
+            for case in selected:
+                outcome, trajectory, assertions = await _execute_case(
+                    adapter,
+                    project,
+                    case,
+                    timeout_s,
+                    prices,
+                    embedder,
+                    judge,
+                    rubric_dirs,
+                )
+                outcomes.append(outcome)
+                assertion_passed += sum(1 for item in assertions if item.passed)
+                assertion_total += len(assertions)
+                await _persist_case_result(
+                    session, run_id, case_ids[case.case_key], outcome, trajectory, assertions
+                )
+                run.cost_usd = round(run.cost_usd + outcome.cost_usd, 8)
+                await session.commit()
 
-        errored = sum(1 for item in outcomes if item.status == "error")
-        run.status = "failed" if errored else "succeeded"
-        run.finished_at = datetime.now(UTC)
-        if mark_baseline:
-            session.add(
-                Baseline(project_id=project_row.id, run_id=run_id, label=baseline_label)
-            )
-        await session.commit()
-        status = run.status
+            errored = sum(1 for item in outcomes if item.status == "error")
+            run.status = "failed" if errored else "succeeded"
+            run.finished_at = datetime.now(UTC)
+            if mark_baseline and run.status == "succeeded":
+                session.add(
+                    Baseline(project_id=project_row.id, run_id=run_id, label=baseline_label)
+                )
+            await session.commit()
+            status = run.status
+        except BaseException as exc:
+            cancelled = isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt))
+            try:
+                await session.rollback()
+            except Exception:  # noqa: BLE001 - 回滚失败仍要继续收尾
+                pass
+            try:
+                await _finalize_run(db, run_id, "cancelled" if cancelled else "failed")
+            except Exception:  # noqa: BLE001 - 收尾失败不能掩盖原始异常
+                pass
+            raise
 
     total = len(outcomes)
     passed = sum(1 for item in outcomes if item.status == "passed")

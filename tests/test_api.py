@@ -40,10 +40,10 @@ async def test_run_list_detail_and_compare(client: AsyncClient) -> None:
     runs = (await client.get("/api/runs")).json()
     assert len(runs) == 1
     assert runs[0]["id"] == outcome["run_id"]
-    assert runs[0]["passed"] == 3
+    assert runs[0]["passed"] == 4
 
     detail = (await client.get(f"/api/runs/{outcome['run_id']}")).json()
-    assert detail["total"] == 3
+    assert detail["total"] == 4
     assert {case["status"] for case in detail["cases"]} == {"passed"}
 
     report = (await client.get(f"/api/compare?candidate={outcome['run_id']}")).json()

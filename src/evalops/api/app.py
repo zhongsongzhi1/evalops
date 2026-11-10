@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -21,6 +22,14 @@ from evalops.config import resolve_db_url
 from evalops.db.models import AssertionResult, Baseline, Case, CaseResult, Project, Run
 from evalops.db.schema import ensure_schema
 from evalops.db.session import Database
+from evalops.github import (
+    ACTION_WHITELIST,
+    WebhookSettings,
+    claim_delivery,
+    payload_digest,
+    process_pull_request,
+    verify_signature,
+)
 from evalops.regression import (
     RegressionError,
     apply_gate,
@@ -118,6 +127,50 @@ def create_app(db: str | None = None) -> FastAPI:
             session.add(Baseline(project_id=run.project_id, run_id=run.id, label=body.label))
             await session.commit()
         return {"ok": True, "run_id": run_id, "label": body.label}
+
+    @app.post("/webhooks/github", status_code=202)
+    async def github_webhook(
+        request: Request,
+        background: BackgroundTasks,
+        database: Database = Depends(_database),
+    ) -> dict[str, Any]:
+        settings = WebhookSettings.from_env()
+        if not settings.secret:
+            raise HTTPException(status_code=503, detail="未配置 EVALOPS_GITHUB_SECRET")
+        raw = await request.body()
+        signature = request.headers.get("X-Hub-Signature-256")
+        if not verify_signature(settings.secret, raw, signature):
+            raise HTTPException(status_code=401, detail="签名校验失败")
+
+        event = request.headers.get("X-GitHub-Event", "")
+        delivery_id = request.headers.get("X-GitHub-Delivery", "")
+        if not delivery_id:
+            raise HTTPException(status_code=400, detail="缺少 X-GitHub-Delivery")
+        try:
+            payload = json.loads(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="payload 不是合法 JSON") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="payload 必须是 JSON 对象")
+
+        if event != "pull_request":
+            return {"status": "ignored", "reason": f"event={event}"}
+        if payload.get("action") not in ACTION_WHITELIST:
+            return {"status": "ignored", "reason": f"action={payload.get('action')}"}
+        head_repo = ((payload.get("pull_request") or {}).get("head") or {}).get("repo") or {}
+        if head_repo.get("fork"):
+            return {"status": "ignored", "reason": "fork_pr"}
+
+        claimed = await claim_delivery(
+            database, delivery_id, event, payload_digest(payload)
+        )
+        if not claimed:
+            return {"status": "duplicate", "delivery_id": delivery_id}
+
+        background.add_task(
+            process_pull_request, database, settings, payload, delivery_id
+        )
+        return {"status": "accepted", "delivery_id": delivery_id}
 
     @app.get("/api/compare")
     async def compare(

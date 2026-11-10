@@ -16,6 +16,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select
 
+from evalops.calibration import MIN_CALIBRATION_SAMPLES, compute_project_kappa
 from evalops.db.models import AssertionResult, Baseline, Case, CaseResult, Regression, Run
 from evalops.db.session import Database
 
@@ -77,6 +78,9 @@ class RegressionReport:
     baseline_assertion_pass_rate: float
     candidate_assertion_pass_rate: float
     cost_delta_ratio: float
+    judge_kappa: float | None = None
+    judge_kappa_weighted: float | None = None
+    judge_kappa_n: int = 0
     new_failures: list[str] = field(default_factory=list)
     fixed: list[str] = field(default_factory=list)
     added: list[str] = field(default_factory=list)
@@ -299,7 +303,25 @@ def apply_gate(report: RegressionReport, gate: GateSpec) -> RegressionReport:
         reasons.append(f"存在被移除的用例: {', '.join(report.removed)}")
 
     if rules.require_kappa is not None:
-        notes.append("require_kappa 暂未参与判定（Judge 校准在阶段 2 接入）")
+        threshold = rules.require_kappa
+        if report.judge_kappa is None:
+            blocked = True
+            reasons.append(
+                f"门禁要求 Judge κ ≥ {threshold:.2f}，但项目尚无人工标注"
+                "（先执行 evalops label 与 evalops kappa）"
+            )
+        elif report.judge_kappa < threshold:
+            blocked = True
+            reasons.append(
+                f"Judge κ {report.judge_kappa:.2f} 低于门禁要求的 {threshold:.2f}"
+            )
+        elif report.judge_kappa_n < MIN_CALIBRATION_SAMPLES:
+            notes.append(
+                f"Judge κ {report.judge_kappa:.2f} 达标，但样本仅 "
+                f"{report.judge_kappa_n} 条（建议 ≥ {MIN_CALIBRATION_SAMPLES}）"
+            )
+        else:
+            notes.append(f"Judge κ {report.judge_kappa:.2f}（n={report.judge_kappa_n}）达标")
 
     if blocked:
         report.verdict = "block"
@@ -346,6 +368,11 @@ async def compare_runs(
     async with db.sessionmaker() as session:
         baseline, candidate = await resolve_runs(session, baseline_ref, candidate_ref)
         report = await build_report(session, baseline.id, candidate.id)
+        kappa = await compute_project_kappa(session, report.project_id)
+        if kappa is not None:
+            report.judge_kappa = kappa.kappa
+            report.judge_kappa_weighted = kappa.kappa_weighted
+            report.judge_kappa_n = kappa.n
         report = apply_gate(report, gate or GateSpec())
         await save_report(session, report)
         return report

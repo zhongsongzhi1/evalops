@@ -6,6 +6,7 @@ const STATUS = {
   error: ["warn", "异常"],
   succeeded: ["pass", "成功"],
   running: ["run", "运行中"],
+  cancelled: ["warn", "已取消"],
 };
 
 const VERDICT = {

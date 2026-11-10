@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from evalops.adapters.base import AdapterError, Step, Trajectory
+from evalops.adapters.base import AdapterError, Trajectory, trajectory_from_dict
 from evalops.cases.dsl import CaseSpec
 
 
@@ -37,23 +37,4 @@ class FakeAdapter:
             data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise AdapterError(f"{path}: fixture 不是合法 JSON: {exc}") from exc
-
-        steps = [
-            Step(
-                step=int(item.get("step", index)),
-                type=str(item.get("type", "llm")),
-                name=str(item.get("name", "")),
-                input=dict(item.get("input") or {}),
-                output=item.get("output"),
-                tokens=int(item.get("tokens", 0)),
-                latency_ms=int(item.get("latency_ms", 0)),
-            )
-            for index, item in enumerate(data.get("steps", []))
-        ]
-        return Trajectory(
-            output=str(data.get("output") or ""),
-            steps=steps,
-            tokens_in=int(data.get("tokens_in", 0)),
-            tokens_out=int(data.get("tokens_out", 0)),
-            latency_ms=int(data.get("latency_ms", 0)),
-        )
+        return trajectory_from_dict(data)

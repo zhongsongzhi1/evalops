@@ -1,0 +1,12 @@
+name: 退款答复质量评审
+key: judge_refund_quality
+input:
+  messages:
+    - role: user
+      content: "我买的课程能退款吗？已经过了7天"
+assertions:
+  - type: llm_judge
+    rubric: ../rubrics/refund_accuracy.md
+    pass_score: 4
+    samples: 3
+tags: [judge, regression]

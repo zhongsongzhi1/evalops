@@ -5,12 +5,22 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import typer
+from sqlalchemy import select
 
+from evalops.calibration import (
+    MIN_CALIBRATION_SAMPLES,
+    CalibrationError,
+    KappaResult,
+    compute_project_kappa,
+    import_labels,
+    resolve_run_ref,
+)
 from evalops.cases.dsl import DslError, load_project
 from evalops.config import resolve_db_url
+from evalops.db.models import Project
 from evalops.db.schema import ensure_schema
 from evalops.db.session import Database
 from evalops.regression import RegressionError, RegressionReport, compare_runs, load_gate
@@ -72,6 +82,11 @@ def _echo_report(report: RegressionReport, gate_name: str) -> None:
         f"断言通过率 {report.candidate_assertion_pass_rate:.1%}"
     )
     typer.echo(f"变化 {report.delta:+.1%} | 成本变化 {report.cost_delta_ratio:+.1%}")
+    if report.judge_kappa is not None:
+        typer.echo(
+            f"Judge κ {report.judge_kappa:.2f}"
+            f"（加权 {report.judge_kappa_weighted or 0:.2f}，n={report.judge_kappa_n}）"
+        )
     if report.new_failures:
         typer.echo(
             f"New Failures ({len(report.new_failures)}): {', '.join(report.new_failures)}"
@@ -225,6 +240,122 @@ def gate_command(
         _echo_report(report, gate.name)
     if report.verdict == "block":
         raise typer.Exit(2)
+
+
+def _echo_kappa(result: KappaResult, threshold: float) -> bool:
+    typer.echo(
+        f"Judge κ {result.kappa:.4f}（二次加权 {result.kappa_weighted:.4f}）| "
+        f"样本 {result.n} | 一致率 {result.observed_agreement:.1%}"
+    )
+    ok = result.kappa >= threshold
+    color = typer.colors.GREEN if ok else typer.colors.RED
+    typer.secho(f"阈值 {threshold:.2f}: {'达标' if ok else '未达标'}", fg=color, bold=True)
+    if not result.sufficient:
+        typer.echo(f"  注: 样本少于 {MIN_CALIBRATION_SAMPLES} 条，结论仅供参考")
+    return ok
+
+
+async def _resolve_project_id(session: Any, project: str | None) -> str | None:
+    if project is None:
+        return None
+    path = Path(project)
+    if path.suffix in (".yaml", ".yml") or path.is_file():
+        try:
+            name = load_project(path).spec.name
+        except DslError as exc:
+            raise CalibrationError(str(exc)) from exc
+    else:
+        name = project
+    row = await session.scalar(select(Project).where(Project.name == name))
+    if row is None:
+        raise CalibrationError(f"项目不存在: {name}")
+    return row.id
+
+
+@app.command("label")
+def label_command(
+    run: str = typer.Option(..., "--run", help="运行 ID、唯一前缀或 latest"),
+    csv_file: Path = typer.Option(
+        ..., "--csv", exists=True, dir_okay=False, help="标注 CSV：case_key,human_score[,notes]"
+    ),
+    labeled_by: str = typer.Option("human", "--labeled-by", help="标注人标识"),
+    db: str | None = typer.Option(None, "--db", help="SQLite 路径或数据库 URL"),
+    as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON"),
+) -> None:
+    """导入人工标注，绑定到本次运行的 Judge 输出。"""
+    url = _prepare_db(db)
+
+    async def _import() -> Any:
+        database = Database.create(url)
+        try:
+            async with database.sessionmaker() as session:
+                resolved = await resolve_run_ref(session, run)
+                return await import_labels(session, resolved.id, csv_file, labeled_by)
+        finally:
+            await database.dispose()
+
+    try:
+        result = asyncio.run(_import())
+    except CalibrationError as exc:
+        _fail(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"导入标注失败: {exc}")
+
+    if as_json:
+        typer.echo(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    else:
+        typer.echo(
+            f"导入 {result.imported} 条 | 更新 {result.updated} 条 | 跳过 {result.skipped} 条"
+        )
+        for error in result.errors:
+            typer.echo(f"  - {error}")
+    if result.skipped and not result.imported and not result.updated:
+        raise typer.Exit(1)
+
+
+@app.command("kappa")
+def kappa_command(
+    project: str | None = typer.Option(
+        None, "--project", "-p", help="项目名或 project.yaml 路径；缺省统计全部标注"
+    ),
+    rubric_version: str | None = typer.Option(
+        None, "--rubric-version", help="只统计指定 rubric 版本"
+    ),
+    threshold: float = typer.Option(0.6, "--threshold", min=0.0, max=1.0, help="κ 达标阈值"),
+    db: str | None = typer.Option(None, "--db", help="SQLite 路径或数据库 URL"),
+    as_json: bool = typer.Option(False, "--json", help="输出机器可读 JSON"),
+) -> None:
+    """计算 Judge 与人工评分的一致性（Cohen's κ）。"""
+    url = _prepare_db(db)
+
+    async def _kappa() -> KappaResult | None:
+        database = Database.create(url)
+        try:
+            async with database.sessionmaker() as session:
+                project_id = await _resolve_project_id(session, project)
+                return await compute_project_kappa(session, project_id, rubric_version)
+        finally:
+            await database.dispose()
+
+    try:
+        result = asyncio.run(_kappa())
+    except CalibrationError as exc:
+        _fail(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"计算 κ 失败: {exc}")
+
+    if result is None:
+        _fail("还没有人工标注；先执行 evalops label --run <run_id> --csv labels.csv")
+
+    if as_json:
+        payload = result.to_dict()
+        payload["threshold"] = threshold
+        payload["passed_threshold"] = result.kappa >= threshold
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        _echo_kappa(result, threshold)
+    if result.kappa < threshold:
+        raise typer.Exit(1)
 
 
 @app.command("serve")

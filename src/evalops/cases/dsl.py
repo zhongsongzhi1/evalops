@@ -48,8 +48,12 @@ class ProjectSpec(BaseModel):
     def _check_entrypoint(self) -> ProjectSpec:
         if self.adapter in ("langgraph", "openai_agents") and not self.entrypoint:
             raise ValueError(f"adapter={self.adapter} 时必须声明 entrypoint")
-        if self.adapter == "fake" and self.entrypoint:
-            raise ValueError("adapter=fake 不接受 entrypoint")
+        if self.adapter in ("fake", "http") and self.entrypoint:
+            raise ValueError(f"adapter={self.adapter} 不接受 entrypoint")
+        if self.adapter == "http":
+            endpoint = self.config.get("endpoint")
+            if not isinstance(endpoint, str) or not endpoint.startswith(("http://", "https://")):
+                raise ValueError("adapter=http 时 config.endpoint 必须是 http(s) URL")
         return self
 
 
@@ -127,6 +131,45 @@ class MaxCostAssertion(BaseModel):
     value: float = Field(gt=0)
 
 
+class SemanticAssertion(BaseModel):
+    """语义相似度断言：输出与参考表述的余弦相似度不低于 ``threshold``。
+
+    embedding 来源由项目配置 ``config.embedding`` 决定，默认 ``mock``（离线演示）。
+    """
+
+    type: Literal["semantic"] = "semantic"
+    reference: str
+    threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+
+    @field_validator("reference")
+    @classmethod
+    def _reference_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("reference 不能为空")
+        return value
+
+
+class LlmJudgeAssertion(BaseModel):
+    """LLM Judge 断言：按 rubric 对输出打分，多次采样取中位数。
+
+    ``rubric`` 指向 Markdown 文件（可带 YAML front matter），路径先按项目目录
+    解析，其次用例目录与当前工作目录。评分来源由 ``config.judge`` 声明，
+    默认离线 ``mock``（仅用于演示与 CI，不代表真实评审能力）。
+    """
+
+    type: Literal["llm_judge"] = "llm_judge"
+    rubric: str
+    pass_score: float = Field(default=4.0, gt=0.0, le=5.0)
+    samples: int = Field(default=3, ge=1, le=9)
+
+    @field_validator("rubric")
+    @classmethod
+    def _rubric_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("rubric 不能为空")
+        return value
+
+
 AssertionSpec = Annotated[
     ContainsAssertion
     | NotContainsAssertion
@@ -134,7 +177,9 @@ AssertionSpec = Annotated[
     | RegexAssertion
     | ToolCallsAssertion
     | MaxLatencyAssertion
-    | MaxCostAssertion,
+    | MaxCostAssertion
+    | SemanticAssertion
+    | LlmJudgeAssertion,
     Field(discriminator="type"),
 ]
 
@@ -174,7 +219,7 @@ class CaseSpec(BaseModel):
         if self.key is not None and not CASE_KEY_PATTERN.match(self.key):
             raise ValueError("key 只能包含字母、数字、点、下划线和短横线，长度 1-64")
         if self.expected.json_schema is not None:
-            raise ValueError("json_schema 断言在阶段 1 提供，当前不支持")
+            raise ValueError("json_schema 断言暂不支持")
         if not self.compiled_assertions():
             raise ValueError("用例必须至少包含一条断言（expected 简写或 assertions）")
         return self
