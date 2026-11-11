@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,6 +36,7 @@ from evalops.db.models import (
     CaseSet,
     Project,
     Run,
+    ToolRecording,
 )
 from evalops.db.session import Database
 from evalops.embeddings import Embedder, build_embedder
@@ -240,6 +243,7 @@ async def _persist_case_result(
     outcome: CaseOutcome,
     trajectory: list[dict[str, Any]],
     assertions: list[AssertionOutcome],
+    recording_source: str = "live",
 ) -> None:
     score = None if outcome.status == "error" else (1.0 if outcome.status == "passed" else 0.0)
     result = CaseResult(
@@ -267,6 +271,35 @@ async def _persist_case_result(
                 detail=item.detail,
             )
         )
+    for step in trajectory:
+        if step.get("type") != "tool":
+            continue
+        request = step.get("input") or {}
+        digest = hashlib.sha256(
+            json.dumps(request, ensure_ascii=False, sort_keys=True, default=str).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        response = step.get("output")
+        serialized = json.dumps(response, ensure_ascii=False, default=str)
+        truncated = len(serialized.encode("utf-8")) > 8192
+        if truncated:
+            stored: dict[str, Any] = {"truncated": True, "preview": serialized[:4000]}
+        elif isinstance(response, dict):
+            stored = response
+        else:
+            stored = {"value": response}
+        session.add(
+            ToolRecording(
+                case_result_id=result.id,
+                step=int(step.get("step", 0)),
+                tool=str(step.get("name", "")),
+                request_digest=digest,
+                response=stored,
+                truncated=truncated,
+                source=recording_source,
+            )
+        )
     await session.commit()
 
 
@@ -292,6 +325,8 @@ async def execute_run(
     prompt_version: str | None = None,
     mark_baseline: bool = False,
     baseline_label: str = "latest",
+    repeat_group: str | None = None,
+    repeat_index: int = 0,
 ) -> RunOutcome:
     loaded = load_cases(cases_path)
     selected = filter_cases(loaded.cases, tags)
@@ -315,6 +350,10 @@ async def execute_run(
 
     async with db.sessionmaker() as session:
         project_row, case_set_row, case_ids = await _upsert_project(session, project, loaded)
+        snapshot = dict(project.spec.config)
+        if repeat_group is not None:
+            snapshot["repeat_group"] = repeat_group
+            snapshot["repeat_index"] = repeat_index
         run = Run(
             project_id=project_row.id,
             case_set_id=case_set_row.id,
@@ -322,12 +361,13 @@ async def execute_run(
             model=str(project.spec.config["model"]) if "model" in project.spec.config else None,
             prompt_version=prompt_version,
             trigger=trigger,
-            config_snapshot=dict(project.spec.config),
+            config_snapshot=snapshot,
             status="running",
         )
         session.add(run)
         await session.commit()
         run_id = run.id
+        recording_source = "fixture" if adapter.name == "fake" else "live"
 
         try:
             for case in selected:
@@ -345,7 +385,13 @@ async def execute_run(
                 assertion_passed += sum(1 for item in assertions if item.passed)
                 assertion_total += len(assertions)
                 await _persist_case_result(
-                    session, run_id, case_ids[case.case_key], outcome, trajectory, assertions
+                    session,
+                    run_id,
+                    case_ids[case.case_key],
+                    outcome,
+                    trajectory,
+                    assertions,
+                    recording_source,
                 )
                 run.cost_usd = round(run.cost_usd + outcome.cost_usd, 8)
                 await session.commit()

@@ -5,7 +5,8 @@
 前两个 Agent 项目回答"能不能做"，EvalOps 回答"改完之后有没有变差"：
 用例集版本化 → 轨迹执行与录制 → 多级断言 → baseline / candidate 对比 → 门禁阻断。
 
-当前进度：**阶段 2（LLM Judge、Judge 校准、GitHub PR 门禁已就绪）**。
+当前进度：**阶段 3 后端（重复运行与 Flaky、指标趋势、轨迹回放与 diff 已就绪）**；
+可视化前端尚未开始。
 
 完整设计与实施计划见 [docs/project-plan.md](docs/project-plan.md)。
 
@@ -48,6 +49,10 @@ evalops gate --candidate latest
 | `evalops gate` | 按门禁规则给出 `pass` / `warn` / `block` | `block` 时 2 |
 | `evalops label` | 导入人工评分，绑定到具体某次 Judge 输出 | 全部跳过时 1 |
 | `evalops kappa` | 计算 Judge 与人工评分的 Cohen's κ | 低于阈值时 1 |
+| `evalops flaky` | 按运行组或指定运行统计 Flaky Rate 与不稳定断言 | 数据不足时 1 |
+| `evalops metrics` | 输出最近 N 次运行的 Pass Rate / 断言通过率 / p95 / 单例成本 | 0 |
+| `evalops diff` | 对比两次运行的轨迹与断言差异，`--case` 展开逐步 diff | 0 |
+| `evalops trace` | 回放单用例的完整轨迹与全部断言结果 | 0 |
 
 运行状态机为 `queued → running → succeeded / failed / cancelled`：执行异常或
 Ctrl+C 也会写入终态（`finished_at` 不为空），不会永久停在 `running`；只有
@@ -65,6 +70,15 @@ evalops gate --baseline <run_id> --candidate <run_id> --gate examples/gates/defa
 
 # 机器可读输出
 evalops gate --candidate latest --json
+
+# 同用例重复 3 次，直接给出 Flaky Rate（并与第一次运行一起标记为同组）
+evalops run -p examples/projects/fake.yaml -c examples/cases --repeat 3
+evalops flaky --group <group_id>
+
+# 指标趋势与轨迹回放 / 对比
+evalops metrics --project demo-agent --limit 20
+evalops trace --run latest --case refund_policy
+evalops diff --case refund_policy
 ```
 
 ## 真实 adapter
@@ -211,6 +225,15 @@ evalops serve --port 8000
 门禁结果；也可以从页面触发一次评测。配置仍由 YAML / CLI 管理。
 需要鉴权或多用户协作时，应在此之上替换为正式 Web 服务。
 
+阶段 3 新增的查询接口：
+
+| 接口 | 作用 |
+|---|---|
+| `GET /api/projects` | 项目列表（运行次数、最近运行时间） |
+| `GET /api/projects/{id}/metrics?limit=20` | 项目最近 N 次运行的指标趋势 |
+| `GET /api/runs/{id}/cases/{case_key}` | 单用例完整轨迹与全部断言 |
+| `GET /api/runs/{id}` | 运行详情，新增 `assertion_pass_rate` / `p95_latency_ms` / `cost_per_case` |
+
 ## 用例 DSL
 
 用例是声明式数据，不是代码：
@@ -258,8 +281,11 @@ rules:
 - **断言通过率** = 通过断言数 / 断言总数（单独统计，不混进 Pass Rate）；
 - **New Failures** = 基线上通过、候选未通过的用例数，按 `case_key` 对齐；
 - **Judge-Human Kappa** = Judge 与人工评分的 Cohen's κ（同时给出二次加权值）；
-- **Cost per Case** = `tokens_in × 输入单价 + tokens_out × 输出单价`，按项目配置分档；
-- **Flaky Rate**（阶段 3）= 参与重跑（N ≥ 3）的用例中结果不一致的占比。
+- **单次运行成本** = Σ`tokens_in × 输入单价 + tokens_out × 输出单价`，单价按项目配置；
+- **Cost per Case** = 单次运行成本 / 用例数；
+- **p95 延迟** = 用例延迟的 95 分位（最近秩法，空集为 0）；
+- **Flaky Rate** = 参与重跑（同组 N ≥ 3 次）的用例中，任一断言结果不一致、或状态在
+  `passed` 与非 `passed` 之间摆动的占比；不足 3 次的用例计入跳过，不参与分母。
 
 ## 目录结构
 
@@ -271,12 +297,15 @@ src/evalops/
 ├── judge.py            # LLM Judge、rubric 加载与版本化（mock / openai）
 ├── calibration.py      # 人工标注导入与 Cohen's κ
 ├── assertions.py       # 断言引擎（精确 + 语义 + 工具轨迹 + Judge）
-├── runner.py           # 执行、轨迹落库、成本计算
+├── runner.py           # 执行、轨迹与工具录制落库、成本计算
 ├── regression.py       # baseline/candidate 对比与门禁判定
+├── metrics.py          # 运行指标（通过率、p95、成本）与项目趋势
+├── flaky.py            # 重复运行分组与 Flaky 判定
+├── diff.py             # 两次运行的轨迹/断言 diff 与单用例回放
 ├── github.py           # PR webhook：签名、幂等、fork 防护、回评
 ├── db/models.py        # 12 张表
 ├── db/schema.py        # Alembic 升级入口
-└── cli.py              # run / compare / gate / label / kappa / serve
+└── cli.py              # run / compare / gate / label / kappa / flaky / metrics / diff / trace / serve
 examples/               # golden 用例、录制轨迹、门禁配置
 tests/                  # 单测 + 门禁回归测试
 ```
@@ -303,8 +332,8 @@ tests/                  # 单测 + 门禁回归测试
 
 - **阶段 0**：仓库骨架、12 张表、DSL、fake adapter、精确断言、三条 CLI、CI
 - **阶段 1**：语义断言（mock / OpenAI 兼容）、真实 adapter（http + entrypoint）、FastAPI 控制面
-- **阶段 2（当前）**：LLM Judge、Judge 校准（Cohen's κ）、门禁 require_kappa、GitHub PR 回评
-- **阶段 3**：flaky 率、p95、成本趋势、轨迹回放 diff、最小前端
+- **阶段 2**：LLM Judge、Judge 校准（Cohen's κ）、门禁 require_kappa、GitHub PR 回评
+- **阶段 3（当前，后端完成）**：重复运行与 flaky 判定、p95 / 成本趋势、轨迹回放与 diff；最小前端待补
 - **阶段 4**：Docker Compose、英文 README、demo 录屏
 
 ## 开发

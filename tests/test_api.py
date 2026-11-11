@@ -67,6 +67,44 @@ async def test_gate_blocks_after_fixture_regression(client: AsyncClient) -> None
     assert report["baseline_run_id"] == baseline["run_id"]
 
 
+async def test_project_metrics_and_case_trace(client: AsyncClient) -> None:
+    outcome = await _run_project(client, client.workdir, baseline=True)
+
+    projects = (await client.get("/api/projects")).json()
+    assert len(projects) == 1
+    project = projects[0]
+    assert project["name"] == "demo-agent"
+    assert project["adapter"] == "fake"
+    assert project["run_count"] == 1
+
+    metrics = (await client.get(f"/api/projects/{project['id']}/metrics")).json()
+    assert metrics["project_id"] == project["id"]
+    assert len(metrics["runs"]) == 1
+    assert metrics["runs"][0]["run_id"] == outcome["run_id"]
+    assert metrics["runs"][0]["assertion_pass_rate"] == 1.0
+
+    trace = (
+        await client.get(f"/api/runs/{outcome['run_id']}/cases/refund_policy")
+    ).json()
+    assert trace["case_key"] == "refund_policy"
+    assert trace["status"] == "passed"
+    assert len(trace["trajectory"]) == 4
+    assert trace["assertions"]
+
+    detail = (await client.get(f"/api/runs/{outcome['run_id']}")).json()
+    assert detail["assertion_pass_rate"] == 1.0
+    assert detail["assertion_total"] == outcome["assertion_total"]
+    assert detail["p95_latency_ms"] > 0
+    assert detail["cost_per_case"] >= 0
+
+
+async def test_unknown_project_and_case_return_404(client: AsyncClient) -> None:
+    assert (await client.get("/api/projects/nope/metrics")).status_code == 404
+    outcome = await _run_project(client, client.workdir)
+    response = await client.get(f"/api/runs/{outcome['run_id']}/cases/nope")
+    assert response.status_code == 404
+
+
 async def test_static_console_served(client: AsyncClient) -> None:
     response = await client.get("/")
     assert response.status_code == 200

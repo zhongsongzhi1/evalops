@@ -22,6 +22,7 @@ from evalops.config import resolve_db_url
 from evalops.db.models import AssertionResult, Baseline, Case, CaseResult, Project, Run
 from evalops.db.schema import ensure_schema
 from evalops.db.session import Database
+from evalops.diff import load_case_trace
 from evalops.github import (
     ACTION_WHITELIST,
     WebhookSettings,
@@ -30,6 +31,7 @@ from evalops.github import (
     process_pull_request,
     verify_signature,
 )
+from evalops.metrics import compute_run_metrics, project_trend
 from evalops.regression import (
     RegressionError,
     apply_gate,
@@ -75,6 +77,29 @@ def create_app(db: str | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/projects")
+    async def list_projects(
+        database: Database = Depends(_database),
+    ) -> list[dict[str, Any]]:
+        return await _list_projects(database)
+
+    @app.get("/api/projects/{project_id}/metrics")
+    async def project_metrics(
+        project_id: str,
+        limit: int = 20,
+        database: Database = Depends(_database),
+    ) -> dict[str, Any]:
+        async with database.sessionmaker() as session:
+            project = await session.get(Project, project_id)
+            if project is None:
+                raise HTTPException(status_code=404, detail="项目不存在")
+            trend = await project_trend(session, project_id, max(1, min(limit, 200)))
+        return {
+            "project_id": project_id,
+            "name": project.name,
+            "runs": [item.to_dict() for item in trend],
+        }
+
     @app.get("/api/runs")
     async def list_runs(
         request: Request,
@@ -89,6 +114,18 @@ def create_app(db: str | None = None) -> FastAPI:
         database: Database = Depends(_database),
     ) -> dict[str, Any]:
         return await _run_detail(database, run_id)
+
+    @app.get("/api/runs/{run_id}/cases/{case_key}")
+    async def get_case_trace(
+        run_id: str,
+        case_key: str,
+        database: Database = Depends(_database),
+    ) -> dict[str, Any]:
+        async with database.sessionmaker() as session:
+            trace = await load_case_trace(session, run_id, case_key)
+        if trace is None:
+            raise HTTPException(status_code=404, detail="运行或用例不存在")
+        return trace
 
     @app.post("/api/runs")
     async def create_run(
@@ -192,6 +229,29 @@ def create_app(db: str | None = None) -> FastAPI:
     return app
 
 
+async def _list_projects(database: Database) -> list[dict[str, Any]]:
+    async with database.sessionmaker() as session:
+        rows = (
+            await session.execute(
+                select(Project, func.count(Run.id), func.max(Run.started_at))
+                .outerjoin(Run, Run.project_id == Project.id)
+                .group_by(Project.id)
+                .order_by(Project.name)
+            )
+        ).all()
+    return [
+        {
+            "id": project.id,
+            "name": project.name,
+            "adapter": project.adapter,
+            "created_at": project.created_at,
+            "run_count": run_count,
+            "last_run_at": last_run_at,
+        }
+        for project, run_count, last_run_at in rows
+    ]
+
+
 async def _list_runs(database: Database, limit: int) -> list[dict[str, Any]]:
     async with database.sessionmaker() as session:
         rows = (
@@ -292,10 +352,12 @@ async def _run_detail(database: Database, run_id: str) -> dict[str, Any]:
                 }
             )
 
-    cases.sort(key=lambda item: (item["status"] == "passed", item["case_key"]))
-    total = len(cases)
-    passed = sum(1 for item in cases if item["status"] == "passed")
-    return {
+        cases.sort(key=lambda item: (item["status"] == "passed", item["case_key"]))
+        total = len(cases)
+        passed = sum(1 for item in cases if item["status"] == "passed")
+        metrics = await compute_run_metrics(session, run.id)
+
+    payload: dict[str, Any] = {
         "id": run.id,
         "project": project.name if project is not None else "",
         "status": run.status,
@@ -313,6 +375,19 @@ async def _run_detail(database: Database, run_id: str) -> dict[str, Any]:
         "pass_rate": passed / total if total else 0.0,
         "cases": cases,
     }
+    if metrics is not None:
+        payload.update(
+            {
+                "assertion_passed": metrics.assertion_passed,
+                "assertion_total": metrics.assertion_total,
+                "assertion_pass_rate": metrics.assertion_pass_rate,
+                "cost_per_case": metrics.cost_per_case,
+                "p95_latency_ms": metrics.p95_latency_ms,
+                "tokens_in": metrics.tokens_in,
+                "tokens_out": metrics.tokens_out,
+            }
+        )
+    return payload
 
 
 app = create_app()
