@@ -37,6 +37,8 @@ def diff_steps(
                 {
                     "step": candidate[index].get("step", index + 1),
                     "status": "added",
+                    "type": candidate[index].get("type"),
+                    "name": candidate[index].get("name"),
                     "changes": [],
                 }
             )
@@ -46,6 +48,8 @@ def diff_steps(
                 {
                     "step": baseline[index].get("step", index + 1),
                     "status": "removed",
+                    "type": baseline[index].get("type"),
+                    "name": baseline[index].get("name"),
                     "changes": [],
                 }
             )
@@ -66,6 +70,8 @@ def diff_steps(
             {
                 "step": cand_step.get("step", index + 1),
                 "status": "changed" if changes else "same",
+                "type": cand_step.get("type"),
+                "name": cand_step.get("name"),
                 "changes": changes,
             }
         )

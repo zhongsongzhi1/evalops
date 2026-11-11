@@ -9,7 +9,10 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/">EvalOps</a>
-    <a class="crumb" href="/">运行记录</a>
+    <nav class="nav">
+      <a href="/">运行记录</a>
+      <a href="/compare.html">对比</a>
+    </nav>
     <span class="crumb">/</span>
     <span class="crumb mono" id="run-crumb">-</span>
     <span class="grow"></span>
@@ -18,10 +21,21 @@
 
   <main class="page">
     <div id="banner"></div>
-    <div class="metrics" id="metrics"></div>
+    <div class="metrics cols-3" id="metrics"></div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>与基线对比</h2>
+        <span class="grow"></span>
+        <a class="btn ghost" id="diff-link" href="/compare.html">逐步 diff</a>
+      </div>
+      <div class="panel-body" id="compare-body"></div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <h2>用例结果</h2>
+        <span class="muted">点击「轨迹」回放步骤与全部断言</span>
         <span class="grow"></span>
         <span class="muted" id="run-meta"></span>
       </div>
@@ -29,6 +43,7 @@
     </section>
   </main>
 
+  <script src="/assets/common.js"></script>
   <script src="/assets/run.js"></script>
 </body>
 </html>

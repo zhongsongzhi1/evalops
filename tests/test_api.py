@@ -67,6 +67,41 @@ async def test_gate_blocks_after_fixture_regression(client: AsyncClient) -> None
     assert report["baseline_run_id"] == baseline["run_id"]
 
 
+async def test_run_diff_endpoint(client: AsyncClient) -> None:
+    workdir: Path = client.workdir
+    baseline = await _run_project(client, workdir, baseline=True)
+
+    fixture = workdir / "fixtures" / "refund_policy.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    payload["output"] = "退款需要人工审核，请通过客服提交申请。"
+    payload["steps"][-1]["output"] = payload["output"]
+    fixture.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    candidate = await _run_project(client, workdir)
+    summary = (
+        await client.get(f"/api/diff?candidate={candidate['run_id']}")
+    ).json()
+    assert summary["baseline_run_id"] == baseline["run_id"]
+    entry = next(
+        item for item in summary["cases"] if item["case_key"] == "refund_policy"
+    )
+    assert entry["changed"] is True
+    assert entry["step_changes"] >= 1
+
+    detailed = (
+        await client.get(
+            f"/api/diff?candidate={candidate['run_id']}&case=refund_policy"
+        )
+    ).json()
+    assert detailed["detailed"] is True
+    assert any(step["status"] == "changed" for step in detailed["cases"][0]["steps"])
+
+    missing = await client.get(
+        f"/api/diff?candidate={candidate['run_id']}&case=missing_case"
+    )
+    assert missing.status_code == 409
+
+
 async def test_project_metrics_and_case_trace(client: AsyncClient) -> None:
     outcome = await _run_project(client, client.workdir, baseline=True)
 

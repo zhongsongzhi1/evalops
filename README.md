@@ -5,8 +5,7 @@
 前两个 Agent 项目回答"能不能做"，EvalOps 回答"改完之后有没有变差"：
 用例集版本化 → 轨迹执行与录制 → 多级断言 → baseline / candidate 对比 → 门禁阻断。
 
-当前进度：**阶段 3 后端（重复运行与 Flaky、指标趋势、轨迹回放与 diff 已就绪）**；
-可视化前端尚未开始。
+当前进度：**阶段 3（重复运行与 Flaky、指标趋势、轨迹回放与 diff、最小可视化控制台均已就绪）**。
 
 完整设计与实施计划见 [docs/project-plan.md](docs/project-plan.md)。
 
@@ -221,8 +220,10 @@ evalops serve --port 8000
 # 打开 http://127.0.0.1:8000
 ```
 
-页面只读为主：运行列表、运行详情（指标 + 失败断言定位）、一键标记基线并查看
-门禁结果；也可以从页面触发一次评测。配置仍由 YAML / CLI 管理。
+页面只读为主，包含三块：运行列表与项目指标趋势（Pass Rate / 断言通过率 / p95 /
+单例成本）；运行详情（指标、对比摘要、用例轨迹回放与全部断言）；基线 vs 候选对比页
+（门禁结论、New Failures、逐步轨迹 diff）。也可以从页面触发一次评测并标记基线，
+配置仍由 YAML / CLI 管理。
 需要鉴权或多用户协作时，应在此之上替换为正式 Web 服务。
 
 阶段 3 新增的查询接口：
@@ -233,6 +234,7 @@ evalops serve --port 8000
 | `GET /api/projects/{id}/metrics?limit=20` | 项目最近 N 次运行的指标趋势 |
 | `GET /api/runs/{id}/cases/{case_key}` | 单用例完整轨迹与全部断言 |
 | `GET /api/runs/{id}` | 运行详情，新增 `assertion_pass_rate` / `p95_latency_ms` / `cost_per_case` |
+| `GET /api/diff?baseline=&candidate=&case=` | 两次运行的逐步轨迹与断言 diff |
 
 ## 用例 DSL
 
@@ -333,7 +335,7 @@ tests/                  # 单测 + 门禁回归测试
 - **阶段 0**：仓库骨架、12 张表、DSL、fake adapter、精确断言、三条 CLI、CI
 - **阶段 1**：语义断言（mock / OpenAI 兼容）、真实 adapter（http + entrypoint）、FastAPI 控制面
 - **阶段 2**：LLM Judge、Judge 校准（Cohen's κ）、门禁 require_kappa、GitHub PR 回评
-- **阶段 3（当前，后端完成）**：重复运行与 flaky 判定、p95 / 成本趋势、轨迹回放与 diff；最小前端待补
+- **阶段 3（当前，完成）**：重复运行与 flaky 判定、p95 / 成本趋势、轨迹回放与 diff、最小可视化控制台
 - **阶段 4**：Docker Compose、英文 README、demo 录屏
 
 ## 开发

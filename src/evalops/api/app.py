@@ -22,7 +22,7 @@ from evalops.config import resolve_db_url
 from evalops.db.models import AssertionResult, Baseline, Case, CaseResult, Project, Run
 from evalops.db.schema import ensure_schema
 from evalops.db.session import Database
-from evalops.diff import load_case_trace
+from evalops.diff import DiffError, diff_runs, load_case_trace
 from evalops.github import (
     ACTION_WHITELIST,
     WebhookSettings,
@@ -223,6 +223,21 @@ def create_app(db: str | None = None) -> FastAPI:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
         report = apply_gate(report, load_gate(None))
         return report.to_dict()
+
+    @app.get("/api/diff")
+    async def diff(
+        baseline: str = "baseline",
+        candidate: str = "latest",
+        case: str | None = None,
+        database: Database = Depends(_database),
+    ) -> dict[str, Any]:
+        async with database.sessionmaker() as session:
+            try:
+                base, cand = await resolve_runs(session, baseline, candidate)
+                payload = await diff_runs(session, base.id, cand.id, case)
+            except (RegressionError, DiffError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return payload
 
     if WEB_DIR.is_dir():
         app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

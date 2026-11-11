@@ -9,12 +9,26 @@
 <body>
   <header class="topbar">
     <a class="brand" href="/">EvalOps</a>
-    <span class="crumb">评测控制台</span>
+    <nav class="nav">
+      <a class="active" href="/">运行记录</a>
+      <a href="/compare.html">对比</a>
+    </nav>
     <span class="grow"></span>
-    <span class="muted">运行记录与门禁</span>
+    <span class="muted">评测控制台</span>
   </header>
 
   <main class="page">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>指标趋势</h2>
+        <span class="muted">最近 20 次运行</span>
+        <span class="grow"></span>
+        <select class="select" id="project-select" aria-label="选择项目"></select>
+      </div>
+      <div class="chart-wrap" id="trend-chart"></div>
+      <div class="panel-body" id="trend-summary"></div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <h2>新建运行</h2>
@@ -46,6 +60,7 @@
     </section>
   </main>
 
+  <script src="/assets/common.js"></script>
   <script src="/assets/index.js"></script>
 </body>
 </html>

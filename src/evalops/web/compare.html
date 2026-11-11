@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EvalOps · 运行对比</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">EvalOps</a>
+    <nav class="nav">
+      <a href="/">运行记录</a>
+      <a class="active" href="/compare.html">对比</a>
+    </nav>
+    <span class="grow"></span>
+    <span class="muted">基线 vs 候选</span>
+  </header>
+
+  <main class="page">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>选择运行</h2>
+        <span class="muted">默认对比最近基线与最近运行</span>
+      </div>
+      <form class="form" id="compare-form">
+        <label>基线运行
+          <select class="select" name="baseline" id="baseline-select"></select>
+        </label>
+        <label>候选运行
+          <select class="select" name="candidate" id="candidate-select"></select>
+        </label>
+        <button class="btn" type="submit">对比</button>
+        <span class="muted" id="compare-msg"></span>
+      </form>
+    </section>
+
+    <div id="banner"></div>
+    <div class="metrics" id="metrics"></div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>回归摘要</h2>
+        <span class="grow"></span>
+        <span class="muted" id="run-refs"></span>
+      </div>
+      <div class="panel-body" id="summary"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>用例变化</h2>
+        <span class="muted">点击「逐步」查看轨迹 diff</span>
+        <span class="grow"></span>
+        <span class="muted" id="case-count"></span>
+      </div>
+      <div id="case-list"></div>
+    </section>
+
+    <section class="panel" id="diff-panel" hidden>
+      <div class="panel-head">
+        <h2>逐步 diff</h2>
+        <span class="crumb mono" id="diff-case"></span>
+        <span class="grow"></span>
+        <button class="btn ghost" id="diff-close" type="button">收起</button>
+      </div>
+      <div id="diff-body"></div>
+    </section>
+  </main>
+
+  <script src="/assets/common.js"></script>
+  <script src="/assets/compare.js"></script>
+</body>
+</html>

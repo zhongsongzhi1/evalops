@@ -197,8 +197,164 @@ tbody tr:hover td { background: var(--surface); }
 
 .empty { padding: 32px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
+/* ---------- 导航与表单控件 ---------- */
+
+.nav { display: flex; align-items: center; gap: 4px; margin-left: 8px; }
+.nav a {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.nav a:hover { background: var(--surface); text-decoration: none; }
+.nav a.active { color: var(--text); background: var(--surface-muted); }
+
+.select {
+  height: 32px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: 400 13px var(--font-sans);
+}
+.select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
+
+.right { text-align: right; }
+.linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand-text);
+  font: 500 13px var(--font-sans);
+  cursor: pointer;
+}
+.linkbtn:hover { text-decoration: underline; }
+
+/* ---------- 趋势图 ---------- */
+
+:root { --chart-pass: #0E9F6E; --chart-assert: #5B6CFF; }
+@media (prefers-color-scheme: dark) {
+  :root { --chart-pass: #32F08C; --chart-assert: #8FA0FF; }
+}
+
+.chart-wrap { padding: 16px 16px 8px; }
+.chart-wrap .empty { padding: 24px 0; }
+.chart { display: block; width: 100%; height: auto; }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .axis { fill: var(--text-muted); font: 10px var(--font-mono); }
+.chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .series.pass { stroke: var(--chart-pass); }
+.chart .series.assert { stroke: var(--chart-assert); stroke-dasharray: 4 3; }
+.chart .dot-pass { fill: var(--chart-pass); }
+.chart .dot-assert { fill: var(--chart-assert); }
+.legend { display: flex; gap: 16px; padding-bottom: 8px; font-size: 12px; color: var(--text-muted); }
+.swatch { display: inline-block; width: 12px; height: 2px; margin-right: 6px; vertical-align: middle; }
+.swatch.pass { background: var(--chart-pass); }
+.swatch.assert { background: var(--chart-assert); }
+
+/* ---------- 指标栅格 ---------- */
+
+.metrics.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.metrics.cols-3 .metric:nth-child(3n + 1) { border-left: 0; }
+.metrics.cols-3 .metric:nth-child(n + 4) { border-top: 1px solid var(--border); }
+
+/* ---------- 对比摘要 ---------- */
+
+.stat-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.stat {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.stat .k { color: var(--text-muted); font-size: 12px; }
+.stat .v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat .v.bad { color: var(--danger); }
+.stat .v.good { color: var(--success); }
+
+.chip-rows { display: grid; gap: 8px; margin-top: 14px; }
+.chip-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.chip-label { min-width: 96px; color: var(--text-muted); }
+.chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font: 400 12px var(--font-mono);
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--text-muted); text-decoration: none; }
+.chip.fail { color: var(--danger); border-color: var(--danger); }
+.chip.pass { color: var(--success); border-color: var(--success); }
+.chip.warn { color: var(--warning); border-color: var(--warning); }
+
+/* ---------- 轨迹回放与 diff ---------- */
+
+.trace-row > td { padding: 0; background: var(--surface); }
+.trace { padding: 16px; }
+.trace-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.trace-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; }
+.subhead { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.steps > li {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.step-head, .diff-step { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.step-no { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font: 500 11px var(--font-mono);
+  text-transform: uppercase;
+}
+.step-name { font-family: var(--font-mono); font-size: 12px; }
+.io { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.io details { flex: 1; min-width: 200px; }
+.io summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
+pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: 12px/18px var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+pre.inline { margin: 0; padding: 4px 6px; max-height: 120px; }
+.mini { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.mini th { padding: 6px 8px; font-size: 11px; }
+.mini td { padding: 6px 8px; border-top: 1px solid var(--border); font-size: 12px; }
+.diff-step.same { opacity: 0.7; }
+.diff-step table, .diff-step .detail { flex-basis: 100%; margin-top: 8px; }
+
+
 @media (max-width: 720px) {
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metric:nth-child(3) { border-left: 0; border-top: 1px solid var(--border); }
   .metric:nth-child(4) { border-top: 1px solid var(--border); }
+
+  .metrics.cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metrics.cols-3 .metric:nth-child(n) {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .metrics.cols-3 .metric:nth-child(1),
+  .metrics.cols-3 .metric:nth-child(2) { border-top: 0; }
+
+  .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trace-grid { grid-template-columns: 1fr; }
+  .chip-label { min-width: 0; }
 }
+
