@@ -338,6 +338,14 @@ tests/                  # 单测 + 门禁回归测试
 - **阶段 3（当前，完成）**：重复运行与 flaky 判定、p95 / 成本趋势、轨迹回放与 diff、最小可视化控制台
 - **阶段 4**：Docker Compose、英文 README、demo 录屏
 
+## 文档
+
+- [项目方案](docs/project-plan.md)：范围、数据模型、指标定义、里程碑
+- 架构决策：[ADR-001 分层复用](docs/adr/001-layered-reuse.md) ·
+  [ADR-002 回归门禁判定模型](docs/adr/002-regression-gate.md) ·
+  [ADR-003 轨迹录制回放与 flaky 归因](docs/adr/003-trajectory-replay-flaky.md)
+- [阶段 3 评测报告](docs/reports/stage3.md)：带实测数字的回归、门禁与 Flaky 结论
+
 ## 开发
 
 ```bash

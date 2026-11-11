@@ -22,7 +22,7 @@ htmlcov/
 *.db
 *.sqlite3
 runs/
-reports/
+/reports/
 
 # Editor / OS
 .idea/
